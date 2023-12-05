@@ -1,0 +1,166 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(repr)
+library(broom)
+library(leaps)
+library(moderndive)
+library(gridExtra)
+library(grid)
+library(reshape2)
+library(ggplot2)
+library(lubridate)
+```
+
+```{r}
+url <- "https://raw.githubusercontent.com/Wendy1907/Sleep_Efficiency_Project/main/Sleep_Efficiency.csv"
+df <- read_csv(url)
+head(df)
+```
+
+
+```{r}
+df <- df %>% 
+        rename("Wakeup.time" = "Wakeup time",
+               "Sleep.duration" = "Sleep duration",
+               "Sleep.efficiency" = "Sleep efficiency",
+               "REM.sleep.percentage" = "REM sleep percentage",
+               "Deep.sleep.percentage" = "Deep sleep percentage",
+               "Light.sleep.percentage" = "Light sleep percentage",
+               "Caffeine.consumption" = "Caffeine consumption",
+               "Alcohol.consumption" = "Alcohol consumption",
+               "Smoking.status" = "Smoking status",
+               "Exercise.frequency" = "Exercise frequency"
+              )
+head(df)
+```
+
+```{r}
+sum(is.na(df))
+```
+
+```{r}
+colSums(is.na(df))
+```
+
+```{r}
+df_clean <- df %>% drop_na(Awakenings, Caffeine.consumption, Alcohol.consumption, Exercise.frequency)
+```
+
+```{r}
+sum(duplicated(df_clean))
+```
+
+```{r}
+head(df_clean)
+```
+
+```{r}
+data <- df_clean %>%
+select(Caffeine.consumption, Alcohol.consumption, Smoking.status, Exercise.frequency, 
+       Sleep.efficiency)
+head(data)
+```
+
+```{r}
+df_clean$Gender <- as.factor(df_clean$Gender) 
+df_clean$Smoking.status <- as.factor(df_clean$Smoking.status)
+
+#delete ID column because it doesn't carry any information
+transformed_df <- df_clean %>% select(-ID)
+# discard Bedtime and wakeup.time
+transformed_df <- select(transformed_df, -Bedtime, -Wakeup.time)
+
+#extract numeric columns only
+numeric_df = transformed_df[, sapply(transformed_df, is.numeric)]
+# calculate their correlation
+cor_matrix <- cor(numeric_df, use = "complete.obs")
+#plot heatmap
+melted_cor_matrix <- melt(cor_matrix)
+ggplot(melted_cor_matrix, aes(Var1, Var2, fill = value)) +
+    geom_tile() +
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                        midpoint = 0, limit = c(-1,1), space = "Lab", 
+                        name="Pearson\nCorrelation") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          axis.title = element_blank()) +
+    coord_fixed()
+
+```
+Deep.sleep.percentage is highly correlated with Light.sleep.percentage. And the
+hour of wakeup is highly correlated with the hour of going to bed.
+```{r}
+features <- c('Sleep.efficiency', 'Age', 'REM.sleep.percentage',
+              'Deep.sleep.percentage', 'Light.sleep.percentage', 
+              'Awakenings', 'Caffeine.consumption', 'Alcohol.consumption',
+              'Exercise.frequency')
+
+plots = list()
+
+for (feature in features) {
+  p1 <- ggplot(transformed_df, aes_string(x = feature)) +
+        geom_density(fill = "blue", alpha = 0.5) +
+        labs(title = paste('Distribution of', feature))
+
+  p2 <- ggplot(transformed_df, aes_string(y = feature)) +
+        geom_boxplot() +
+        labs(title = paste('Box Plot of', feature))
+        coord_flip()
+
+  plots[[length(plots) + 1]] <- p1
+  plots[[length(plots) + 1]] <- p2
+}
+```
+
+```{r}
+#index into the plots list to check distribution of variables
+do.call(grid.arrange, c(plots[1:2]))
+```
+Sleep.efficiency is left-skewed.
+Caffeine consumption is right-skewed
+Alcohol consumption is right-skewed
+exercise frequency is right-skewd
+
+
+```{r}
+```
+
+
+```{r}
+transformed_df <- select(transformed_df, -Light.sleep.percentage)
+```
+
+Because we want to remove the effects of confouding variables, we fit a multivariate
+linear regression using the full transformed dataset.
+```{r}
+FullModel = lm(Sleep.efficiency~.,data = transformed_df)
+summary(FullModel)
+```
+
+do variable selection
+```{r}
+reg = regsubsets(Sleep.efficiency~., data = transformed_df, nvmax = 10)
+s_reg = summary(reg)
+cp_values = s_reg$cp
+num_predictors = seq(along = cp_values)
+plot(num_predictors, cp_values, type = "b", xlab = "Number of Predictors", 
+     ylab = "Cp", main = "Cp vs p")
+abline(a=0,b=1)
+```
+choose p = 8.
+```{r}
+print(s_reg$which)
+```
+
+```{r}
+transformed_df = transformed_df %>% select(-Gender, -Sleep.duration)
+bestModel = lm(Sleep.efficiency~., data = transformed_df)
+summary(bestModel)
+kappa(bestModel)
+plot(bestModel)
+```
