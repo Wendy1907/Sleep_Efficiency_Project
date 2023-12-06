@@ -73,7 +73,7 @@ df_clean$Smoking.status <- as.factor(df_clean$Smoking.status)
 #delete ID column because it doesn't carry any information
 transformed_df <- df_clean %>% select(-ID)
 # discard Bedtime and wakeup.time
-transformed_df <- select(transformed_df, -Bedtime, -Wakeup.time)
+transformed_df <- transformed_df %>% select(-Bedtime, -Wakeup.time)
 
 #extract numeric columns only
 numeric_df = transformed_df[, sapply(transformed_df, is.numeric)]
@@ -92,11 +92,14 @@ ggplot(melted_cor_matrix, aes(Var1, Var2, fill = value)) +
     coord_fixed()
 
 ```
-Deep.sleep.percentage is highly correlated with Light.sleep.percentage. And the
-hour of wakeup is highly correlated with the hour of going to bed.
+Deep.sleep.percentage is highly correlated with Light.sleep.percentage. 
+```{r}
+transformed_df <- select(transformed_df, -Light.sleep.percentage)
+```
+
 ```{r}
 features <- c('Sleep.efficiency', 'Age', 'REM.sleep.percentage',
-              'Deep.sleep.percentage', 'Light.sleep.percentage', 
+              'Deep.sleep.percentage', 
               'Awakenings', 'Caffeine.consumption', 'Alcohol.consumption',
               'Exercise.frequency')
 
@@ -120,6 +123,9 @@ for (feature in features) {
 ```{r}
 #index into the plots list to check distribution of variables
 do.call(grid.arrange, c(plots[1:2]))
+do.call(grid.arrange, c(plots[11:12]))
+do.call(grid.arrange, c(plots[13:14]))
+do.call(grid.arrange, c(plots[15:16]))
 ```
 Sleep.efficiency is left-skewed.
 Caffeine consumption is right-skewed
@@ -128,15 +134,14 @@ exercise frequency is right-skewd
 
 
 ```{r}
+table(transformed_df$Smoking.status)
 ```
 
-
-```{r}
-transformed_df <- select(transformed_df, -Light.sleep.percentage)
-```
 
 Because we want to remove the effects of confouding variables, we fit a multivariate
-linear regression using the full transformed dataset.
+linear regression using the full transformed dataset. Noted that sleep efficiency
+is a percentage between 0 and 1. We want to make sure the fitted values are within 
+the range of 0 and 1.
 ```{r}
 FullModel = lm(Sleep.efficiency~.,data = transformed_df)
 summary(FullModel)
@@ -163,4 +168,51 @@ bestModel = lm(Sleep.efficiency~., data = transformed_df)
 summary(bestModel)
 kappa(bestModel)
 plot(bestModel)
+```
+
+```{r}
+which(abs(rstudent(bestModel))>3) ## No outliers
+which(cooks.distance(bestModel)>0.5) ## No influential points
+```
+
+```{r}
+
+boxplot(Sleep.efficiency~Smoking.status, data = transformed_df, 
+        main = "Boxplot By smoking status")
+```
+
+```{r}
+pca_raw = transformed_df %>% select(Caffeine.consumption, Alcohol.consumption, Exercise.frequency)
+pca_result = prcomp(pca_raw, scale= TRUE, center = TRUE)
+# use the first two principal components to visual sleep efficiency
+proj_pca <- predict(pca_result)[,1:2] |>
+  as_tibble() |>
+  mutate(Sleep.efficiency = transformed_df$Sleep.efficiency)
+
+ggplot(proj_pca, aes(x = PC1, y = PC2, color = Sleep.efficiency)) + 
+  geom_point() +
+  scale_color_gradient(low = "blue", high = "red")
+
+
+scaled_raw = scale(pca_raw,center = TRUE, scale=TRUE)
+proj_pca = data.frame(proj_pca, scaled_raw)
+proj_pca = pivot_longer(proj_pca, cols = names(pca_raw), names_to = "features", 
+                      values_to = "score")
+
+ggplot(proj_pca, aes(x= PC1, y=PC2, color = score)) +
+  geom_point() +
+  scale_color_gradient(low = "blue", high="red") +
+  facet_wrap(~features, ncol = 3)
+
+
+pca_result$rotation[, 1:2] |>
+  as_tibble() |>
+  mutate(feature = names(pca_raw)) |>
+  pivot_longer(-feature) |>
+  ggplot(aes(value, feature, fill = feature)) +
+  facet_wrap(~name) +
+  geom_col() +
+  theme(legend.position = "none", axis.title = element_blank()) +
+  geom_vline(xintercept = 0)
+
 ```
